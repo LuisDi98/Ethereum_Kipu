@@ -1,56 +1,89 @@
 // SPDX-License-Identifier: MIT
-
 pragma solidity ^0.8.26;
 
 contract ExercisePayable {
+    address public owner;
+    uint public feeBasisPoints;
+    uint public treasury;
 
-    mapping(address => uint) public balances;
-
-    function addValueToUser() public{
-        balances[msg.sender] = 1000;
+    struct User {
+        string firstName;
+        string lastName;
+        uint256 balance;
+        bool isRegistered;
     }
 
-    function getValueFromUser() public view returns(uint){
-        return balances[msg.sender];
+    mapping(address => User) public users;
+
+    event UserRegistered(address indexed userAddress, string firstName, string lastName);
+    event Deposit(address indexed userAddress, uint256 amount);
+    event Withdrawal(address indexed userAddress, uint256 amount, uint256 fee);
+    event TreasuryWithdrawal(address indexed owner, uint256 amount);
+
+    modifier onlyRegistered() {
+        require(users[msg.sender].isRegistered, "User not registered");
+        _;
     }
 
-    //mapping
-    //payable
-    //modifiers
-
-    receive() external payable {
-
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not the owner");
+        _;
     }
 
-    fallback() external payable {
-
+    constructor(uint _feeBasisPoints) {
+        owner = msg.sender;
+        feeBasisPoints = _feeBasisPoints;
     }
 
-    //funcion para enviar ether al contrato
-    //asigna esos fondos a un usuario
-    //guardamos en mapping el address -> balance actual del usuario
-    //modifier chequear que msg.value > 0
+    function register(string calldata _firstName, string calldata _lastName) public {
+        require(!users[msg.sender].isRegistered, "User already registered");
 
-    //withdrawUserFunds
-    //required fundsForUser[msg.value] >= _fundsToWithdraw
-    
-    function withdrawBalance(uint _amount) public {
-        require(balances[msg.sender] >=_amount, "Insufficient balance");
-        payable(msg.sender).transfer(_amount);
-        balances[msg.sender] -= _amount;
+        users[msg.sender] = User({
+            firstName: _firstName,
+            lastName: _lastName,
+            balance: 0,
+            isRegistered: true
+        });
+
+        emit UserRegistered(msg.sender, _firstName, _lastName);
     }
 
-    function withdraw(uint _amount) public {
-        require(_amount <= address(this).balance, "Insufficient balance");
-        payable(msg.sender).transfer(_amount);
+    function deposit() public payable onlyRegistered {
+        require(msg.value > 0, "Deposit amount must be greater than 0");
+
+        users[msg.sender].balance += msg.value;
+
+        emit Deposit(msg.sender, msg.value);
     }
 
-    function sendValueToUser() public payable {
-        balances[msg.sender] += msg.value;
+    function getBalance() public view onlyRegistered returns (uint256) {
+        return users[msg.sender].balance;
     }
 
-    function getBalanceForUser(address _userAddress) public view returns(uint) {
-        return balances[_userAddress];
+    function withdraw(uint256 _amount) public onlyRegistered {
+        require(users[msg.sender].balance >= _amount, "Insufficient balance");
+
+        uint256 feeAmount = (_amount * feeBasisPoints) / 10000;
+        uint256 netAmount = _amount - feeAmount;
+
+        users[msg.sender].balance -= _amount;
+        treasury += feeAmount;
+
+        payable(msg.sender).transfer(netAmount);
+
+        emit Withdrawal(msg.sender, netAmount, feeAmount);
     }
 
+    function withdrawTreasury(uint256 _amount) public onlyOwner {
+        require(treasury >= _amount, "Insufficient treasury balance");
+
+        treasury -= _amount;
+        payable(owner).transfer(_amount);
+
+        emit TreasuryWithdrawal(owner, _amount);
+    }
+
+    function getTreasuryBalance() public view onlyOwner returns (uint256) {
+        return treasury;
+    }
 }
